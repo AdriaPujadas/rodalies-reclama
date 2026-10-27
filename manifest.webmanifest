@@ -1,0 +1,19 @@
+{
+  "name": "Rodalies Reclama",
+  "short_name": "Rodalies",
+  "description": "Registra retrasos y prepara reclamaciones desde tu dispositivo.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f6f8",
+  "theme_color": "#173b57",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

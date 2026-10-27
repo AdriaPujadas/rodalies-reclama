@@ -1,0 +1,12 @@
+RODALIES RECLAMA — privacidad (versión inicial)
+
+- No requiere registro ni cuenta.
+- No contiene publicidad ni analítica de terceros.
+- Los viajes y archivos adjuntos se almacenan en el almacenamiento local del navegador del usuario.\n- Si el usuario abre «Datos oficiales», el navegador intenta solicitar el feed público de avisos de Renfe; la petición transmite una solicitud técnica a ese dominio, pero no incluye los viajes guardados.
+- No hay base de datos central de usuarios ni sincronización entre dispositivos.
+- La web pública aloja únicamente los archivos de la aplicación; no recibe los viajes introducidos en el formulario.
+- Abrir enlaces oficiales lleva al usuario a webs externas sujetas a sus propias políticas.
+- El usuario puede exportar una copia JSON que incluye adjuntos y un CSV del historial sin adjuntos.
+- Borrar los datos del navegador, usar navegación privada o perder el dispositivo puede provocar pérdida de información.
+- Antes de publicación definitiva, el titular del sitio debe revisar esta información y adaptar la política si añade alojamiento de formularios, analítica, publicidad, cuentas o servicios de terceros.
+- Proyecto independiente, no afiliado a Renfe ni a Rodalies.
