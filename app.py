@@ -71,6 +71,7 @@ def home():
     })
 
 
+
 @app.get("/api/trips")
 def trips():
     origin = request.args.get("origin", "").strip().casefold()
@@ -86,84 +87,109 @@ def trips():
         travel_date = date.fromisoformat(date_text)
         zf = get_gtfs()
 
-        stops = read_csv(zf, "stops.txt")
-        stop_times = read_csv(zf, "stop_times.txt")
-        trips_data = read_csv(zf, "trips.txt")
-        calendars = read_csv(zf, "calendar.txt")
-        exceptions = read_csv(zf, "calendar_dates.txt")
-        routes = read_csv(zf, "routes.txt")
-
-        def matches(name, query):
-            return query in name.casefold()
+        # Estos archivos son mucho más pequeños que stop_times.txt.
+        stops = list(read_csv(zf, "stops.txt"))
+        trips_data = list(read_csv(zf, "trips.txt"))
+        calendars = list(read_csv(zf, "calendar.txt"))
+        exceptions = list(read_csv(zf, "calendar_dates.txt"))
+        routes = list(read_csv(zf, "routes.txt"))
 
         origin_ids = {
             row["stop_id"] for row in stops
-            if matches(row.get("stop_name", ""), origin)
+            if origin in row.get("stop_name", "").casefold()
         }
         destination_ids = {
             row["stop_id"] for row in stops
-            if matches(row.get("stop_name", ""), destination)
+            if destination in row.get("stop_name", "").casefold()
         }
 
         if not origin_ids or not destination_ids:
             return jsonify({
                 "error": "No se han encontrado ambas estaciones en este GTFS.",
                 "origin_matches": [
-                    s.get("stop_name") for s in stops
-                    if matches(s.get("stop_name", ""), origin)
+                    s.get("stop_name", "") for s in stops
+                    if origin in s.get("stop_name", "").casefold()
                 ],
                 "destination_matches": [
-                    s.get("stop_name") for s in stops
-                    if matches(s.get("stop_name", ""), destination)
+                    s.get("stop_name", "") for s in stops
+                    if destination in s.get("stop_name", "").casefold()
                 ]
             }), 404
 
-        by_trip = {}
-        for row in stop_times:
-            by_trip.setdefault(row["trip_id"], []).append(row)
+        stop_names = {
+            row["stop_id"]: row.get("stop_name", "")
+            for row in stops
+        }
+        trip_lookup = {
+            row["trip_id"]: row for row in trips_data
+        }
+        route_lookup = {
+            row["route_id"]: row for row in routes
+        }
 
-        trip_lookup = {row["trip_id"]: row for row in trips_data}
-        route_lookup = {row["route_id"]: row for row in routes}
+        # Guardamos solo las paradas de origen y destino,
+        # no todas las filas del archivo stop_times.txt.
+        relevant_stops = origin_ids | destination_ids
+        origin_by_trip = {}
+        destination_by_trip = {}
+
+        for row in read_csv(zf, "stop_times.txt"):
+            stop_id = row.get("stop_id", "")
+            if stop_id not in relevant_stops:
+                continue
+
+            trip_id = row.get("trip_id", "")
+            try:
+                sequence = int(row.get("stop_sequence", ""))
+            except (TypeError, ValueError):
+                continue
+
+            item = {
+                "trip_id": trip_id,
+                "stop_id": stop_id,
+                "stop_sequence": sequence,
+                "departure_time": row.get("departure_time", ""),
+                "arrival_time": row.get("arrival_time", "")
+            }
+
+            if stop_id in origin_ids:
+                origin_by_trip.setdefault(trip_id, []).append(item)
+
+            if stop_id in destination_ids:
+                destination_by_trip.setdefault(trip_id, []).append(item)
+
         results = []
 
-        for trip_id, rows in by_trip.items():
-            rows.sort(key=lambda r: int(r["stop_sequence"]))
-            origin_rows = [r for r in rows if r["stop_id"] in origin_ids]
-            destination_rows = [
-                r for r in rows if r["stop_id"] in destination_ids
-            ]
+        for trip_id in origin_by_trip.keys() & destination_by_trip.keys():
+            trip = trip_lookup.get(trip_id)
+            if not trip:
+                continue
 
-            for start in origin_rows:
-                for end in destination_rows:
-                    if int(start["stop_sequence"]) >= int(end["stop_sequence"]):
+            service_id = trip.get("service_id", "")
+            if (calendars or exceptions) and not active_service(
+                service_id, travel_date, calendars, exceptions
+            ):
+                continue
+
+            route = route_lookup.get(trip.get("route_id", ""), {})
+
+            for start in origin_by_trip[trip_id]:
+                for end in destination_by_trip[trip_id]:
+                    if start["stop_sequence"] >= end["stop_sequence"]:
                         continue
 
-                    trip = trip_lookup.get(trip_id)
-                    if not trip:
-                        continue
-
-                    service_id = trip.get("service_id", "")
-                    if calendars or exceptions:
-                        if not active_service(
-                            service_id, travel_date, calendars, exceptions
-                        ):
-                            continue
-
-                    route = route_lookup.get(trip.get("route_id", ""), {})
                     results.append({
                         "trip_id": trip_id,
                         "route_id": trip.get("route_id", ""),
-                        "linea": route.get("route_short_name")
-                                 or route.get("route_long_name", ""),
-                        "salida_teorica": start.get("departure_time", ""),
-                        "llegada_teorica": end.get("arrival_time", ""),
-                        "origen": next(
-                            (s["stop_name"] for s in stops
-                             if s["stop_id"] == start["stop_id"]), origin
+                        "linea": (
+                            route.get("route_short_name")
+                            or route.get("route_long_name", "")
                         ),
-                        "destino": next(
-                            (s["stop_name"] for s in stops
-                             if s["stop_id"] == end["stop_id"]), destination
+                        "salida_teorica": start["departure_time"],
+                        "llegada_teorica": end["arrival_time"],
+                        "origen": stop_names.get(start["stop_id"], origin),
+                        "destino": stop_names.get(
+                            end["stop_id"], destination
                         )
                     })
 
@@ -173,21 +199,20 @@ def trips():
             "origen_consulta": origin,
             "destino_consulta": destination,
             "fecha": date_text,
-            "fuente": "GTFS configurado en el servidor",
+            "fuente": "GTFS oficial de Renfe",
             "resultados": results,
             "total": len(results),
-            "nota": "Horarios teóricos; no indican por sí solos el retraso real."
+            "nota": (
+                "Horarios teóricos; no indican por sí solos "
+                "el retraso real."
+            )
         })
 
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 503
+        return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         app.logger.exception("Error consultando GTFS")
         return jsonify({
             "error": "No se pudo consultar el archivo GTFS.",
             "detalle": str(exc)
         }), 502
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
