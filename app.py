@@ -13,6 +13,7 @@ GTFS_URL = "https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.z
 
 
 
+
 def read_csv(zf, filename):
     try:
         with zf.open(filename) as f:
@@ -21,6 +22,14 @@ def read_csv(zf, filename):
     except KeyError:
         return []
 
+
+def iter_csv(zf, filename):
+    try:
+        with zf.open(filename) as f:
+            content = io.TextIOWrapper(f, encoding="utf-8-sig")
+            yield from csv.DictReader(content)
+    except KeyError:
+        return
 
 
 
