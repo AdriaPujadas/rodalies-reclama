@@ -281,3 +281,33 @@ def debug():
     except Exception as exc:
         app.logger.exception("Error en diagnóstico GTFS")
         return jsonify({"error": str(exc)}), 502
+
+@app.get("/api/debug-trips")
+def debug_trips():
+    try:
+        with get_gtfs() as zf:
+            target_ids = {"71500", "71801"}
+            counts = {"71500": 0, "71801": 0}
+            examples = {"71500": [], "71801": []}
+
+            for row in iter_csv(zf, "stop_times.txt"):
+                stop_id = row.get("stop_id", "")
+                if stop_id in target_ids:
+                    counts[stop_id] += 1
+
+                    if len(examples[stop_id]) < 5:
+                        examples[stop_id].append({
+                            "trip_id": row.get("trip_id", ""),
+                            "stop_sequence": row.get("stop_sequence", ""),
+                            "arrival_time": row.get("arrival_time", ""),
+                            "departure_time": row.get("departure_time", "")
+                        })
+
+            return jsonify({
+                "paradas_en_stop_times": counts,
+                "ejemplos": examples
+            })
+
+    except Exception as exc:
+        app.logger.exception("Error en diagnóstico de viajes")
+        return jsonify({"error": str(exc)}), 502
