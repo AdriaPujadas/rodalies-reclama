@@ -75,6 +75,10 @@ def home():
     })
 
 
+@app.get("/api/test")
+def test():
+    return jsonify({"status": "ok", "mensaje": "La aplicación responde"})
+
 
 @app.get("/api/trips")
 def trips():
