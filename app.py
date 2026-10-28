@@ -150,7 +150,7 @@ def trips():
         origin_by_trip = {}
         destination_by_trip = {}
 
-        for row in read_csv(zf, "stop_times.txt"):
+        for row in iter_csv(zf, "stop_times.txt"):
             stop_id = row.get("stop_id", "")
             if stop_id not in relevant_stops:
                 continue
