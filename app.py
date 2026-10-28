@@ -89,6 +89,7 @@ def test():
     return jsonify({"status": "ok", "mensaje": "La aplicación responde"})
 
 
+
 @app.get("/api/trips")
 def trips():
     origin = request.args.get("origin", "").strip().casefold()
@@ -102,115 +103,132 @@ def trips():
 
     try:
         travel_date = date.fromisoformat(date_text)
-        zf = get_gtfs()
 
-        # Estos archivos son mucho más pequeños que stop_times.txt.
-        stops = list(read_csv(zf, "stops.txt"))
-        trips_data = list(read_csv(zf, "trips.txt"))
-        calendars = list(read_csv(zf, "calendar.txt"))
-        exceptions = list(read_csv(zf, "calendar_dates.txt"))
-        routes = list(read_csv(zf, "routes.txt"))
+        with get_gtfs() as zf:
+            # Leer las estaciones y buscar los identificadores.
+            stops = read_csv(zf, "stops.txt")
 
-        origin_ids = {
-            row["stop_id"] for row in stops
-            if origin in row.get("stop_name", "").casefold()
-        }
-        destination_ids = {
-            row["stop_id"] for row in stops
-            if destination in row.get("stop_name", "").casefold()
-        }
-
-        if not origin_ids or not destination_ids:
-            return jsonify({
-                "error": "No se han encontrado ambas estaciones en este GTFS.",
-                "origin_matches": [
-                    s.get("stop_name", "") for s in stops
-                    if origin in s.get("stop_name", "").casefold()
-                ],
-                "destination_matches": [
-                    s.get("stop_name", "") for s in stops
-                    if destination in s.get("stop_name", "").casefold()
-                ]
-            }), 404
-
-        stop_names = {
-            row["stop_id"]: row.get("stop_name", "")
-            for row in stops
-        }
-        trip_lookup = {
-            row["trip_id"]: row for row in trips_data
-        }
-        route_lookup = {
-            row["route_id"]: row for row in routes
-        }
-
-        # Guardamos solo las paradas de origen y destino,
-        # no todas las filas del archivo stop_times.txt.
-        relevant_stops = origin_ids | destination_ids
-        origin_by_trip = {}
-        destination_by_trip = {}
-
-        for row in iter_csv(zf, "stop_times.txt"):
-            stop_id = row.get("stop_id", "")
-            if stop_id not in relevant_stops:
-                continue
-
-            trip_id = row.get("trip_id", "")
-            try:
-                sequence = int(row.get("stop_sequence", ""))
-            except (TypeError, ValueError):
-                continue
-
-            item = {
-                "trip_id": trip_id,
-                "stop_id": stop_id,
-                "stop_sequence": sequence,
-                "departure_time": row.get("departure_time", ""),
-                "arrival_time": row.get("arrival_time", "")
+            origin_ids = {
+                s["stop_id"] for s in stops
+                if origin in s.get("stop_name", "").casefold()
+            }
+            destination_ids = {
+                s["stop_id"] for s in stops
+                if destination in s.get("stop_name", "").casefold()
             }
 
-            if stop_id in origin_ids:
-                origin_by_trip.setdefault(trip_id, []).append(item)
+            if not origin_ids or not destination_ids:
+                return jsonify({
+                    "error": "No se han encontrado ambas estaciones.",
+                    "origin_matches": [
+                        s.get("stop_name", "") for s in stops
+                        if origin in s.get("stop_name", "").casefold()
+                    ],
+                    "destination_matches": [
+                        s.get("stop_name", "") for s in stops
+                        if destination in s.get("stop_name", "").casefold()
+                    ]
+                }), 404
 
-            if stop_id in destination_ids:
-                destination_by_trip.setdefault(trip_id, []).append(item)
+            stop_names = {
+                s["stop_id"]: s.get("stop_name", "")
+                for s in stops
+            }
+            del stops
 
-        results = []
+            # Conservar solo los viajes que pasan por el origen
+            # y el destino, y sus datos mínimos.
+            relevant_stops = origin_ids | destination_ids
+            origin_by_trip = {}
+            destination_by_trip = {}
 
-        for trip_id in origin_by_trip.keys() & destination_by_trip.keys():
-            trip = trip_lookup.get(trip_id)
-            if not trip:
-                continue
+            for row in iter_csv(zf, "stop_times.txt"):
+                stop_id = row.get("stop_id", "")
+                if stop_id not in relevant_stops:
+                    continue
 
-            service_id = trip.get("service_id", "")
-            if (calendars or exceptions) and not active_service(
-                service_id, travel_date, calendars, exceptions
-            ):
-                continue
+                trip_id = row.get("trip_id", "")
+                try:
+                    sequence = int(row.get("stop_sequence", ""))
+                except (TypeError, ValueError):
+                    continue
 
-            route = route_lookup.get(trip.get("route_id", ""), {})
+                item = (
+                    sequence,
+                    row.get("departure_time", ""),
+                    row.get("arrival_time", ""),
+                    stop_id
+                )
 
-            for start in origin_by_trip[trip_id]:
-                for end in destination_by_trip[trip_id]:
-                    if start["stop_sequence"] >= end["stop_sequence"]:
-                        continue
+                if stop_id in origin_ids:
+                    origin_by_trip.setdefault(trip_id, []).append(item)
 
-                    results.append({
-                        "trip_id": trip_id,
-                        "route_id": trip.get("route_id", ""),
-                        "linea": (
-                            route.get("route_short_name")
-                            or route.get("route_long_name", "")
-                        ),
-                        "salida_teorica": start["departure_time"],
-                        "llegada_teorica": end["arrival_time"],
-                        "origen": stop_names.get(start["stop_id"], origin),
-                        "destino": stop_names.get(
-                            end["stop_id"], destination
-                        )
-                    })
+                if stop_id in destination_ids:
+                    destination_by_trip.setdefault(trip_id, []).append(item)
 
-        results.sort(key=lambda r: r["salida_teorica"])
+            del row
+
+            # Solo necesitamos los viajes candidatos, no todo trips.txt.
+            candidate_ids = (
+                origin_by_trip.keys() & destination_by_trip.keys()
+            )
+            if not candidate_ids:
+                return jsonify({
+                    "origen_consulta": origin,
+                    "destino_consulta": destination,
+                    "fecha": date_text,
+                    "fuente": "GTFS oficial de Renfe",
+                    "resultados": [],
+                    "total": 0
+                })
+
+            trips_data = {
+                t["trip_id"]: t
+                for t in iter_csv(zf, "trips.txt")
+                if t.get("trip_id") in candidate_ids
+            }
+
+            calendars = read_csv(zf, "calendar.txt")
+            exceptions = read_csv(zf, "calendar_dates.txt")
+            routes = read_csv(zf, "routes.txt")
+
+            route_lookup = {
+                r["route_id"]: r for r in routes
+            }
+
+            results = []
+            for trip_id in candidate_ids:
+                trip = trips_data.get(trip_id)
+                if not trip:
+                    continue
+
+                service_id = trip.get("service_id", "")
+                if (calendars or exceptions) and not active_service(
+                    service_id, travel_date, calendars, exceptions
+                ):
+                    continue
+
+                route = route_lookup.get(trip.get("route_id", ""), {})
+
+                for start in origin_by_trip[trip_id]:
+                    for end in destination_by_trip[trip_id]:
+                        if start[0] >= end[0]:
+                            continue
+
+                        results.append({
+                            "trip_id": trip_id,
+                            "route_id": trip.get("route_id", ""),
+                            "linea": (
+                                route.get("route_short_name")
+                                or route.get("route_long_name", "")
+                            ),
+                            "salida_teorica": start[1],
+                            "llegada_teorica": end[2],
+                            "origen": stop_names.get(start[3], origin),
+                            "destino": stop_names.get(end[3], destination)
+                        })
+
+            results.sort(key=lambda r: r["salida_teorica"])
 
         return jsonify({
             "origen_consulta": origin,
