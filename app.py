@@ -11,13 +11,15 @@ app = Flask(__name__)
 GTFS_URL = "https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip"
 
 
+
 def read_csv(zf, filename):
     try:
         with zf.open(filename) as f:
             content = io.TextIOWrapper(f, encoding="utf-8-sig")
-            return csv.DictReader(content)
+            return list(csv.DictReader(content))
     except KeyError:
-        return iter(())
+        return []
+
 
 
 def get_gtfs():
