@@ -15,9 +15,9 @@ def read_csv(zf, filename):
     try:
         with zf.open(filename) as f:
             content = io.TextIOWrapper(f, encoding="utf-8-sig")
-            return list(csv.DictReader(content))
+            return csv.DictReader(content)
     except KeyError:
-        return []
+        return iter(())
 
 
 def get_gtfs():
