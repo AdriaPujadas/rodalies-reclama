@@ -251,3 +251,33 @@ def trips():
             "error": "No se pudo consultar el archivo GTFS.",
             "detalle": str(exc)
         }), 502
+
+@app.get("/api/debug")
+def debug():
+    try:
+        with get_gtfs() as zf:
+            stops = read_csv(zf, "stops.txt")
+
+            matches = [
+                {
+                    "stop_id": s.get("stop_id", ""),
+                    "stop_name": s.get("stop_name", ""),
+                    "stop_code": s.get("stop_code", ""),
+                    "parent_station": s.get("parent_station", "")
+                }
+                for s in stops
+                if "tarragona" in s.get("stop_name", "").casefold()
+                or "barcelona-sants" in s.get("stop_name", "").casefold()
+                or "barcelona sants" in s.get("stop_name", "").casefold()
+                or "sants" in s.get("stop_name", "").casefold()
+            ]
+
+            return jsonify({
+                "total_estaciones_gtfs": len(stops),
+                "coincidencias": matches[:100],
+                "total_coincidencias": len(matches)
+            })
+
+    except Exception as exc:
+        app.logger.exception("Error en diagnóstico GTFS")
+        return jsonify({"error": str(exc)}), 502
