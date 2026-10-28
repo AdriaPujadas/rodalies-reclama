@@ -9,7 +9,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-GTFS_URL = os.environ.get("GTFS_URL", "")
+GTFS_URL = os.environ.get("https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip", "")
 
 
 def read_csv(zf, filename):
