@@ -311,3 +311,21 @@ def debug_trips():
     except Exception as exc:
         app.logger.exception("Error en diagnóstico de viajes")
         return jsonify({"error": str(exc)}), 502
+
+@app.get("/api/debug-columns")
+def debug_columns():
+    try:
+        with get_gtfs() as zf:
+            with zf.open("stop_times.txt") as f:
+                import io
+                import csv
+
+                content = io.TextIOWrapper(f, encoding="utf-8-sig")
+                reader = csv.DictReader(content)
+                return jsonify({
+                    "columnas": reader.fieldnames,
+                    "primera_fila": next(reader, None)
+                })
+    except Exception as exc:
+        app.logger.exception("Error leyendo columnas GTFS")
+        return jsonify({"error": str(exc)}), 502
