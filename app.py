@@ -802,3 +802,88 @@ def debug_trayecto():
             "error": "Respuesta de Renfe no válida."
         }), 502
 
+
+@app.post("/api/capturar")
+def capturar():
+    # Comprobar el token de seguridad.
+    token = request.headers.get("X-Capture-Token", "")
+
+    if not os.environ.get("CAPTURE_TOKEN"):
+        return jsonify({"error": "CAPTURE_TOKEN no está configurado"}), 500
+
+    if token != os.environ["CAPTURE_TOKEN"]:
+        return jsonify({"error": "No autorizado"}), 401
+
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    supabase_key = os.environ.get("SUPABASE_KEY", "")
+
+    if not supabase_url or not supabase_key:
+        return jsonify({"error": "Falta configurar Supabase"}), 500
+
+    try:
+        # Descargar los dos feeds oficiales de Renfe.
+        alerts_response = requests.get(
+            "https://gtfsrt.renfe.com/alerts.json",
+            timeout=30
+        )
+        alerts_response.raise_for_status()
+        alerts = alerts_response.json()
+
+        trips_response = requests.get(
+            "https://gtfsrt.renfe.com/trip_updates.json",
+            timeout=30
+        )
+        trips_response.raise_for_status()
+        trip_updates = trips_response.json()
+
+        # Crear una huella digital de ambos feeds.
+        contenido = json.dumps(
+            {"alerts": alerts, "trip_updates": trip_updates},
+            sort_keys=True,
+            separators=(",", ":")
+        )
+        huella = hashlib.sha256(
+            contenido.encode("utf-8")
+        ).hexdigest()
+
+        # Guardar la captura en Supabase.
+        fila = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "feed_timestamp": str(
+                alerts.get("header", {}).get("timestamp", "")
+            ) or None,
+            "alerts": alerts,
+            "trip_updates": trip_updates,
+            "sha256": huella
+        }
+
+        respuesta = requests.post(
+            f"{supabase_url}/rest/v1/renfe_capturas",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            json=fila,
+            timeout=30
+        )
+        respuesta.raise_for_status()
+
+        return jsonify({
+            "status": "ok",
+            "mensaje": "Captura guardada en Supabase",
+            "captured_at": fila["captured_at"],
+            "sha256": huella
+        }), 201
+
+    except requests.RequestException:
+        app.logger.exception("Error guardando captura")
+        return jsonify({
+            "error": "No se pudo descargar Renfe o guardar en Supabase"
+        }), 502
+    except (ValueError, TypeError):
+        app.logger.exception("Error procesando captura")
+        return jsonify({
+            "error": "Los datos recibidos no son válidos"
+        }), 502
