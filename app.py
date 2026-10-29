@@ -27,9 +27,26 @@ def iter_csv(zf, filename):
     try:
         with zf.open(filename) as f:
             content = io.TextIOWrapper(f, encoding="utf-8-sig")
-            yield from csv.DictReader(content)
+            reader = csv.DictReader(content)
+
+            if reader.fieldnames:
+                reader.fieldnames = [
+                    name.strip() if name else name
+                    for name in reader.fieldnames
+                ]
+
+            for row in reader:
+                yield {
+                    key.strip() if key else key: (
+                        value.strip() if isinstance(value, str) else value
+                    )
+                    for key, value in row.items()
+                    if key is not None
+                }
+
     except KeyError:
         return
+
 
 
 
