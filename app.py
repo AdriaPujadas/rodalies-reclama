@@ -1,4 +1,3 @@
-
 import csv
 import io
 import os
@@ -7,12 +6,11 @@ import zipfile
 import json
 import hashlib
 from datetime import date, datetime, timezone
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
 GTFS_URL = "https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip"
-
-
-
 
 
 
