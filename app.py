@@ -460,14 +460,26 @@ def retrasos():
                     "estado": parada.get("scheduleRelationship", "")
                 })
 
-            viajes.append({
-                "id": entity.get("id", ""),
-                "trip_id": trip.get("tripId", ""),
-                "route_id": trip.get("routeId", ""),
-                "estado": trip.get("scheduleRelationship", ""),
-                "actualizacion": update.get("timestamp"),
-                "paradas": retrasos_paradas
-            })
+            
+trip_id = trip.get("tripId", "")
+
+# Identificador provisional para facilitar el cruce con GTFS estático.
+# Se elimina únicamente el prefijo de proveedor observado en los ejemplos.
+trip_id_normalizado = (
+    trip_id[5:]
+    if trip_id.startswith("5101J")
+    else trip_id
+)
+
+viajes.append({
+    "id": entity.get("id", ""),
+    "trip_id": trip_id,
+    "trip_id_normalizado": trip_id_normalizado,
+    "route_id": trip.get("routeId", ""),
+    "estado": trip.get("scheduleRelationship", ""),
+    "actualizacion": update.get("timestamp"),
+    "paradas": retrasos_paradas
+})
 
         return jsonify({
             "fuente": "Renfe GTFS Realtime",
