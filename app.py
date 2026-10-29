@@ -449,3 +449,72 @@ def retrasos():
         return jsonify({
             "error": "No se han podido interpretar los datos de Renfe."
         }), 502
+
+@app.get("/api/debug-retrasos")
+def debug_retrasos():
+    url = "https://gtfsrt.renfe.com/trip_updates.json"
+
+    try:
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        paradas = {}
+        retrasos_conocidos = 0
+        viajes_con_retraso = 0
+        viajes_cancelados = 0
+
+        for entity in data.get("entity", []):
+            update = entity.get("tripUpdate", {})
+            trip = update.get("trip", {})
+
+            if trip.get("scheduleRelationship") == "CANCELED":
+                viajes_cancelados += 1
+
+            tiene_retraso = False
+
+            for parada in update.get("stopTimeUpdate", []):
+                stop_id = parada.get("stopId", "")
+                if not stop_id:
+                    continue
+
+                if stop_id not in paradas:
+                    paradas[stop_id] = {
+                        "actualizaciones": 0,
+                        "retrasos_conocidos": 0,
+                        "retraso_maximo_segundos": None
+                    }
+
+                info = paradas[stop_id]
+                info["actualizaciones"] += 1
+
+                for momento in ("arrival", "departure"):
+                    retraso = parada.get(momento, {}).get("delay")
+
+                    if retraso is not None:
+                        info["retrasos_conocidos"] += 1
+                        retrasos_conocidos += 1
+
+                        actual = info["retraso_maximo_segundos"]
+                        if actual is None or retraso > actual:
+                            info["retraso_maximo_segundos"] = retraso
+
+                        if retraso > 0:
+                            tiene_retraso = True
+
+            if tiene_retraso:
+                viajes_con_retraso += 1
+
+        return jsonify({
+            "fuente": "Renfe GTFS Realtime",
+            "total_viajes": len(data.get("entity", [])),
+            "paradas_distintas": len(paradas),
+            "retrasos_conocidos": retrasos_conocidos,
+            "viajes_con_retraso": viajes_con_retraso,
+            "viajes_cancelados": viajes_cancelados,
+            "paradas": paradas
+        })
+
+    except requests.RequestException:
+        app.logger.exception("Error consultando diagnóstico")
+        return jsonify({"error": "No se pudo conectar con Renfe."}), 502
