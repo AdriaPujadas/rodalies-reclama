@@ -461,25 +461,44 @@ def retrasos():
                 })
 
             
-trip_id = trip.get("tripId", "")
 
-# Identificador provisional para facilitar el cruce con GTFS estático.
-# Se elimina únicamente el prefijo de proveedor observado en los ejemplos.
-trip_id_normalizado = (
-    trip_id[5:]
-    if trip_id.startswith("5101J")
-    else trip_id
-)
+            trip_id = trip.get("tripId", "")
 
-viajes.append({
-    "id": entity.get("id", ""),
-    "trip_id": trip_id,
-    "trip_id_normalizado": trip_id_normalizado,
-    "route_id": trip.get("routeId", ""),
-    "estado": trip.get("scheduleRelationship", ""),
-    "actualizacion": update.get("timestamp"),
-    "paradas": retrasos_paradas
-})
+            # Identificador provisional para cruzar con el GTFS estático.
+            trip_id_normalizado = (
+                trip_id[5:]
+                if trip_id.startswith("5101J")
+                else trip_id
+            )
+
+            viajes.append({
+                "id": entity.get("id", ""),
+                "trip_id": trip_id,
+                "trip_id_normalizado": trip_id_normalizado,
+                "route_id": trip.get("routeId", ""),
+                "estado": trip.get("scheduleRelationship", ""),
+                "actualizacion": update.get("timestamp"),
+                "paradas": retrasos_paradas
+            })
+
+        return jsonify({
+            "fuente": "Renfe GTFS Realtime",
+            "actualizacion": data.get("header", {}).get("timestamp"),
+            "total_viajes": len(viajes),
+            "viajes": viajes[:200]
+        })
+
+    except requests.RequestException:
+        app.logger.exception("Error consultando actualizaciones de viajes")
+        return jsonify({
+            "error": "No se pudo conectar con las actualizaciones de Renfe."
+        }), 502
+    except (ValueError, TypeError):
+        app.logger.exception("Respuesta de viajes no válida")
+        return jsonify({
+            "error": "No se han podido interpretar los datos de Renfe."
+        }), 502
+
 
         return jsonify({
             "fuente": "Renfe GTFS Realtime",
