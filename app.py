@@ -300,19 +300,25 @@ def debug():
                     "stop_id": s.get("stop_id", ""),
                     "stop_name": s.get("stop_name", ""),
                     "stop_code": s.get("stop_code", ""),
-                    "parent_station": s.get("parent_station", "")
+                    "parent_station": s.get("parent_station", ""),
+                    "location_type": s.get("location_type", ""),
+                    "stop_lat": s.get("stop_lat", ""),
+                    "stop_lon": s.get("stop_lon", "")
                 }
                 for s in stops
                 if "tarragona" in s.get("stop_name", "").casefold()
-                or "barcelona-sants" in s.get("stop_name", "").casefold()
-                or "barcelona sants" in s.get("stop_name", "").casefold()
                 or "sants" in s.get("stop_name", "").casefold()
             ]
 
             return jsonify({
                 "total_estaciones_gtfs": len(stops),
-                "coincidencias": matches[:100],
-                "total_coincidencias": len(matches)
+                "coincidencias": matches,
+                "total_coincidencias": len(matches),
+                "nota": (
+                    "La presencia de una estación en el feed "
+                    "en tiempo real no confirma por sí sola "
+                    "su equivalencia con una estación estática."
+                )
             })
 
     except Exception as exc:
