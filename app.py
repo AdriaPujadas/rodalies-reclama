@@ -500,13 +500,7 @@ def retrasos():
         }), 502
 
 
-        return jsonify({
-            "fuente": "Renfe GTFS Realtime",
-            "actualizacion": data.get("header", {}).get("timestamp"),
-            "total_viajes": len(viajes),
-            "viajes": viajes[:200]
-        })
-
+        
     except requests.RequestException:
         app.logger.exception("Error consultando actualizaciones de viajes")
         return jsonify({
