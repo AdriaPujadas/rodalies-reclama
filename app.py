@@ -800,9 +800,14 @@ def debug_trayecto():
             "error": "Respuesta de Renfe no válida."
         }), 502
 
-
-@app.post("/api/capturar")
+@app.route("/api/capturar", methods=["POST", "OPTIONS"])
 def capturar():
+    if request.method == "OPTIONS":
+        respuesta = app.make_response("")
+        respuesta.headers["Access-Control-Allow-Origin"] = "https://hoppscotch.io"
+        respuesta.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        respuesta.headers["Access-Control-Allow-Headers"] = "X-Capture-Token, Content-Type"
+        return respuesta, 204
     # Comprobar el token de seguridad.
     token = request.headers.get("X-Capture-Token", "")
 
