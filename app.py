@@ -391,3 +391,61 @@ def incidencias():
         return jsonify({
             "error": "Renfe ha devuelto datos que no se han podido interpretar."
         }), 502
+
+@app.get("/api/retrasos")
+def retrasos():
+    url = "https://gtfsrt.renfe.com/trip_updates.json"
+
+    try:
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        viajes = []
+
+        for entity in data.get("entity", []):
+            update = entity.get("tripUpdate")
+            if not update:
+                continue
+
+            trip = update.get("trip", {})
+            retrasos_paradas = []
+
+            for parada in update.get("stopTimeUpdate", []):
+                llegada = parada.get("arrival", {})
+                salida = parada.get("departure", {})
+
+                retrasos_paradas.append({
+                    "estacion_id": parada.get("stopId", ""),
+                    "secuencia": parada.get("stopSequence"),
+                    "retraso_llegada_segundos": llegada.get("delay"),
+                    "retraso_salida_segundos": salida.get("delay"),
+                    "estado": parada.get("scheduleRelationship", "")
+                })
+
+            viajes.append({
+                "id": entity.get("id", ""),
+                "trip_id": trip.get("tripId", ""),
+                "route_id": trip.get("routeId", ""),
+                "estado": trip.get("scheduleRelationship", ""),
+                "actualizacion": update.get("timestamp"),
+                "paradas": retrasos_paradas
+            })
+
+        return jsonify({
+            "fuente": "Renfe GTFS Realtime",
+            "actualizacion": data.get("header", {}).get("timestamp"),
+            "total_viajes": len(viajes),
+            "viajes": viajes[:200]
+        })
+
+    except requests.RequestException:
+        app.logger.exception("Error consultando actualizaciones de viajes")
+        return jsonify({
+            "error": "No se pudo conectar con las actualizaciones de Renfe."
+        }), 502
+    except (ValueError, TypeError):
+        app.logger.exception("Respuesta de viajes no válida")
+        return jsonify({
+            "error": "No se han podido interpretar los datos de Renfe."
+        }), 502
