@@ -518,3 +518,53 @@ def debug_retrasos():
     except requests.RequestException:
         app.logger.exception("Error consultando diagnóstico")
         return jsonify({"error": "No se pudo conectar con Renfe."}), 502
+
+@app.get("/api/debug-trayecto")
+def debug_trayecto():
+    url = "https://gtfsrt.renfe.com/trip_updates.json"
+    estaciones = {"71500": "Tarragona", "71801": "Barcelona-Sants"}
+
+    try:
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        coincidencias = []
+
+        for entity in data.get("entity", []):
+            update = entity.get("tripUpdate", {})
+            trip = update.get("trip", {})
+
+            for parada in update.get("stopTimeUpdate", []):
+                stop_id = parada.get("stopId", "")
+
+                if stop_id not in estaciones:
+                    continue
+
+                llegada = parada.get("arrival", {})
+                salida = parada.get("departure", {})
+
+                coincidencias.append({
+                    "estacion": estaciones[stop_id],
+                    "stop_id": stop_id,
+                    "trip_id_tiempo_real": trip.get("tripId", ""),
+                    "route_id": trip.get("routeId", ""),
+                    "estado_viaje": trip.get("scheduleRelationship", ""),
+                    "retraso_llegada_segundos": llegada.get("delay"),
+                    "retraso_salida_segundos": salida.get("delay"),
+                    "actualizacion": update.get("timestamp")
+                })
+
+        return jsonify({
+            "fuente": "Renfe GTFS Realtime",
+            "actualizacion": data.get("header", {}).get("timestamp"),
+            "total_coincidencias": len(coincidencias),
+            "coincidencias": coincidencias
+        })
+
+    except requests.RequestException:
+        app.logger.exception("Error consultando trayecto")
+        return jsonify({"error": "No se pudo conectar con Renfe."}), 502
+    except (ValueError, TypeError):
+        app.logger.exception("Error interpretando trayecto")
+        return jsonify({"error": "Respuesta de Renfe no válida."}), 502
