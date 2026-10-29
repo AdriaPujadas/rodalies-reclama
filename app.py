@@ -581,10 +581,16 @@ def debug_retrasos():
         app.logger.exception("Error consultando diagnóstico")
         return jsonify({"error": "No se pudo conectar con Renfe."}), 502
 
+
 @app.get("/api/debug-trayecto")
 def debug_trayecto():
     url = "https://gtfsrt.renfe.com/trip_updates.json"
-    estaciones = {"71500": "Tarragona", "71801": "Barcelona-Sants"}
+    estaciones = {
+        "71500": "Tarragona",
+        "71801": "Barcelona-Sants",
+        "71503": "Tarragona (variante por confirmar)",
+        "71802": "Barcelona-Sants (variante por confirmar)"
+    }
 
     try:
         response = requests.get(url, timeout=20)
@@ -594,8 +600,12 @@ def debug_trayecto():
         coincidencias = []
 
         for entity in data.get("entity", []):
-            update = entity.get("tripUpdate", {})
+            update = entity.get("tripUpdate")
+            if not update:
+                continue
+
             trip = update.get("trip", {})
+            trip_id = trip.get("tripId", "")
 
             for parada in update.get("stopTimeUpdate", []):
                 stop_id = parada.get("stopId", "")
@@ -609,24 +619,35 @@ def debug_trayecto():
                 coincidencias.append({
                     "estacion": estaciones[stop_id],
                     "stop_id": stop_id,
-                    "trip_id_tiempo_real": trip.get("tripId", ""),
+                    "trip_id_tiempo_real": trip_id,
+                    "trip_id_sufijo_candidato": (
+                        trip_id[5:]
+                        if trip_id.startswith("5101J")
+                        else trip_id
+                    ),
                     "route_id": trip.get("routeId", ""),
                     "estado_viaje": trip.get("scheduleRelationship", ""),
+                    "secuencia_parada": parada.get("stopSequence"),
                     "retraso_llegada_segundos": llegada.get("delay"),
                     "retraso_salida_segundos": salida.get("delay"),
-                    "actualizacion": update.get("timestamp")
+                    "relacion_horario": parada.get("scheduleRelationship", "")
                 })
 
         return jsonify({
             "fuente": "Renfe GTFS Realtime",
-            "actualizacion": data.get("header", {}).get("timestamp"),
+            "actualizacion_feed": data.get("header", {}).get("timestamp"),
             "total_coincidencias": len(coincidencias),
             "coincidencias": coincidencias
         })
 
     except requests.RequestException:
         app.logger.exception("Error consultando trayecto")
-        return jsonify({"error": "No se pudo conectar con Renfe."}), 502
+        return jsonify({
+            "error": "No se pudo conectar con Renfe."
+        }), 502
+
     except (ValueError, TypeError):
         app.logger.exception("Error interpretando trayecto")
-        return jsonify({"error": "Respuesta de Renfe no válida."}), 502
+        return jsonify({
+            "error": "Respuesta de Renfe no válida."
+        }), 502
