@@ -329,3 +329,65 @@ def debug_columns():
     except Exception as exc:
         app.logger.exception("Error leyendo columnas GTFS")
         return jsonify({"error": str(exc)}), 502
+
+@app.get("/api/incidencias")
+def incidencias():
+    url = "https://gtfsrt.renfe.com/alerts.json"
+
+    try:
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        incidencias = []
+
+        for entity in data.get("entity", []):
+            alert = entity.get("alert", {})
+            translations = (
+                alert.get("descriptionText", {}).get("translation", [])
+            )
+
+            descripcion = next(
+                (
+                    item.get("text", "")
+                    for item in translations
+                    if item.get("language") in ("es", "ca")
+                ),
+                translations[0].get("text", "") if translations else ""
+            )
+
+            if not descripcion:
+                continue
+
+            incidencias.append({
+                "id": entity.get("id", ""),
+                "descripcion": descripcion,
+                "rutas": [
+                    item.get("routeId")
+                    for item in alert.get("informedEntity", [])
+                    if item.get("routeId")
+                ],
+                "estaciones": [
+                    item.get("stopId")
+                    for item in alert.get("informedEntity", [])
+                    if item.get("stopId")
+                ]
+            })
+
+        return jsonify({
+            "fuente": "Renfe GTFS Realtime",
+            "actualizacion": data.get("header", {}).get("timestamp"),
+            "total": len(incidencias),
+            "incidencias": incidencias
+        })
+
+    except requests.RequestException:
+        app.logger.exception("Error conectando con incidencias de Renfe")
+        return jsonify({
+            "error": "No se pudo conectar con los datos de incidencias de Renfe."
+        }), 502
+    except (ValueError, TypeError):
+        app.logger.exception("Respuesta de incidencias no válida")
+        return jsonify({
+            "error": "Renfe ha devuelto datos que no se han podido interpretar."
+        }), 502
