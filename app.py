@@ -890,3 +890,9 @@ def capturar():
         return jsonify({
             "error": "Los datos recibidos no son válidos"
         }), 502
+@app.after_request
+def añadir_cors(respuesta):
+    respuesta.headers["Access-Control-Allow-Origin"] = "https://hoppscotch.io"
+    respuesta.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    respuesta.headers["Access-Control-Allow-Headers"] = "X-Capture-Token, Content-Type"
+    return respuesta
