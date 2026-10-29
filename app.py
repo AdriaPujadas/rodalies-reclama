@@ -4,8 +4,9 @@ import io
 import os
 import requests
 import zipfile
-from datetime import date
-from flask import Flask, jsonify, request
+import json
+import hashlib
+from datetime import date, datetime, timezone
 
 app = Flask(__name__)
 GTFS_URL = "https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip"
