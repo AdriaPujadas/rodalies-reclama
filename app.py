@@ -807,7 +807,7 @@ def capturar():
         respuesta.headers["Access-Control-Allow-Origin"] = "https://hoppscotch.io"
         respuesta.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
         respuesta.headers["Access-Control-Allow-Headers"] = "X-Capture-Token, Content-Type"
-        return respuesta, 204
+        return respuesta, 200
     # Comprobar el token de seguridad.
     token = request.headers.get("X-Capture-Token", "")
 
