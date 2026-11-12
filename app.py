@@ -896,3 +896,82 @@ def añadir_cors(respuesta):
     respuesta.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
     respuesta.headers["Access-Control-Allow-Headers"] = "X-Capture-Token, Content-Type"
     return respuesta
+
+@app.get("/api/feeds-tiempo-real")
+def feeds_tiempo_real():
+    fuentes = {
+        "cercanias": "https://gtfsrt.renfe.com/trip_updates.json",
+        "larga_distancia": "https://gtfsrt.renfe.com/trip_updates_LD.json"
+    }
+
+    resultados = {}
+
+    for nombre, url in fuentes.items():
+        try:
+            response = requests.get(url, timeout=25)
+            response.raise_for_status()
+            feed = response.json()
+
+            total_viajes = 0
+            total_paradas = 0
+            total_retrasos = 0
+            total_suprimidas = 0
+            total_cancelados = 0
+            ejemplos = []
+
+            for entity in feed.get("entity", []):
+                update = entity.get("tripUpdate")
+                if not update:
+                    continue
+
+                total_viajes += 1
+                trip = update.get("trip", {})
+
+                if trip.get("scheduleRelationship") == "CANCELED":
+                    total_cancelados += 1
+
+                for parada in update.get("stopTimeUpdate", []):
+                    total_paradas += 1
+
+                    if parada.get("scheduleRelationship") == "SKIPPED":
+                        total_suprimidas += 1
+
+                    retraso = parada.get("departure", {}).get("delay")
+                    if retraso is None:
+                        retraso = parada.get("arrival", {}).get("delay")
+
+                    if retraso is not None and retraso > 0:
+                        total_retrasos += 1
+
+                if len(ejemplos) < 5:
+                    ejemplos.append({
+                        "trip_id": trip.get("tripId", ""),
+                        "estado": trip.get("scheduleRelationship", "")
+                    })
+
+            resultados[nombre] = {
+                "estado": "ok",
+                "timestamp_feed": feed.get("header", {}).get("timestamp"),
+                "total_viajes": total_viajes,
+                "total_paradas": total_paradas,
+                "paradas_con_retraso": total_retrasos,
+                "paradas_suprimidas": total_suprimidas,
+                "viajes_cancelados": total_cancelados,
+                "ejemplos": ejemplos
+            }
+
+        except requests.RequestException as exc:
+            resultados[nombre] = {
+                "estado": "error",
+                "detalle": str(exc)
+            }
+        except (ValueError, TypeError) as exc:
+            resultados[nombre] = {
+                "estado": "error",
+                "detalle": str(exc)
+            }
+
+    return jsonify({
+        "fuente": "Feeds GTFS-RT de Renfe",
+        "resultados": resultados
+    })
