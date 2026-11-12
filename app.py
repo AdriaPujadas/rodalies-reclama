@@ -976,17 +976,72 @@ def feeds_tiempo_real():
         "resultados": resultados
     })
 
+
 @app.get("/api/trayecto-tiempo-real")
 def trayecto_tiempo_real():
+    from zoneinfo import ZoneInfo
+
     origen = request.args.get("origen", "71500")
     destino = request.args.get("destino", "71801")
+    fecha_texto = request.args.get("fecha")
+
+    if not fecha_texto:
+        fecha_texto = datetime.now(
+            ZoneInfo("Europe/Madrid")
+        ).date().isoformat()
+
+    try:
+        fecha_consulta = date.fromisoformat(fecha_texto)
+    except ValueError:
+        return jsonify({
+            "error": "Fecha no válida. Utiliza AAAA-MM-DD."
+        }), 400
 
     fuentes = {
         "cercanias": "https://gtfsrt.renfe.com/trip_updates.json",
         "larga_distancia": "https://gtfsrt.renfe.com/trip_updates_LD.json"
     }
 
-    encontrados = []
+    sin_incidencias = []
+    con_incidencias = []
+    errores = {}
+    sin_fecha = 0
+
+    def obtener_fecha(trip):
+        valor = trip.get("startDate")
+
+        if valor:
+            try:
+                if len(valor) == 8:
+                    return datetime.strptime(
+                        valor, "%Y%m%d"
+                    ).date()
+                return date.fromisoformat(valor)
+            except ValueError:
+                pass
+
+        trip_id = str(trip.get("tripId", ""))
+
+        try:
+            return date.fromisoformat(trip_id[-10:])
+        except ValueError:
+            return None
+
+    def datos_parada(parada):
+        llegada = parada.get("arrival", {})
+        salida = parada.get("departure", {})
+
+        retraso = salida.get("delay")
+        if retraso is None:
+            retraso = llegada.get("delay")
+
+        return {
+            "stop_id": parada.get("stopId"),
+            "llegada": llegada.get("time"),
+            "salida": salida.get("time"),
+            "retraso_segundos": retraso,
+            "estado": parada.get("scheduleRelationship")
+        }
 
     for nombre, url in fuentes.items():
         try:
@@ -1000,8 +1055,16 @@ def trayecto_tiempo_real():
                     continue
 
                 trip = update.get("trip", {})
-                paradas = update.get("stopTimeUpdate", [])
+                fecha_tren = obtener_fecha(trip)
 
+                if fecha_tren is None:
+                    sin_fecha += 1
+                    continue
+
+                if fecha_tren != fecha_consulta:
+                    continue
+
+                paradas = update.get("stopTimeUpdate", [])
                 ids = [
                     str(p.get("stopId", ""))
                     for p in paradas
@@ -1010,40 +1073,89 @@ def trayecto_tiempo_real():
                 if origen not in ids or destino not in ids:
                     continue
 
-                indice_origen = ids.index(origen)
-                indice_destino = ids.index(destino)
+                i_origen = ids.index(origen)
+                i_destino = ids.index(destino)
 
-                if indice_origen >= indice_destino:
+                if i_origen >= i_destino:
                     continue
 
-                def datos_parada(parada):
-                    salida = parada.get("departure", {})
-                    llegada = parada.get("arrival", {})
+                parada_origen = paradas[i_origen]
+                parada_destino = paradas[i_destino]
+                intermedias = paradas[i_origen + 1:i_destino]
 
-                    return {
-                        "stop_id": parada.get("stopId"),
-                        "llegada": llegada.get("time"),
-                        "salida": salida.get("time"),
-                        "retraso_llegada_segundos": llegada.get("delay"),
-                        "retraso_salida_segundos": salida.get("delay"),
-                        "estado": parada.get("scheduleRelationship")
-                    }
+                estado_viaje = trip.get(
+                    "scheduleRelationship", "UNKNOWN"
+                )
 
-                encontrados.append({
+                origen_datos = datos_parada(parada_origen)
+                destino_datos = datos_parada(parada_destino)
+
+                suprimidas = [
+                    str(p.get("stopId"))
+                    for p in paradas[i_origen:i_destino + 1]
+                    if p.get("scheduleRelationship") == "SKIPPED"
+                ]
+
+                retrasos = [
+                    datos_parada(p)["retraso_segundos"]
+                    for p in paradas[i_origen:i_destino + 1]
+                ]
+
+                hay_retraso = any(
+                    isinstance(r, (int, float)) and r > 0
+                    for r in retrasos
+                )
+
+                motivos = []
+
+                if estado_viaje == "CANCELED":
+                    motivos.append("Viaje cancelado")
+
+                if parada_origen.get("scheduleRelationship") == "SKIPPED":
+                    motivos.append("Origen suprimido")
+
+                if parada_destino.get("scheduleRelationship") == "SKIPPED":
+                    motivos.append("Destino suprimido")
+
+                if any(
+                    p.get("scheduleRelationship") == "SKIPPED"
+                    for p in intermedias
+                ):
+                    motivos.append("Parada intermedia suprimida")
+
+                if hay_retraso:
+                    motivos.append("Retraso comunicado")
+
+                tren = {
                     "fuente": nombre,
+                    "fecha": fecha_tren.isoformat(),
                     "trip_id": trip.get("tripId"),
-                    "estado_viaje": trip.get("scheduleRelationship"),
-                    "origen": datos_parada(paradas[indice_origen]),
-                    "destino": datos_parada(paradas[indice_destino])
-                })
+                    "estado_viaje": estado_viaje,
+                    "origen": origen_datos,
+                    "destino": destino_datos,
+                    "paradas_suprimidas": suprimidas,
+                    "incidencias": motivos
+                }
 
-        except (requests.RequestException, ValueError, TypeError):
-            continue
+                if motivos:
+                    con_incidencias.append(tren)
+                else:
+                    sin_incidencias.append(tren)
+
+        except requests.RequestException as exc:
+            errores[nombre] = str(exc)
+        except (ValueError, TypeError) as exc:
+            errores[nombre] = str(exc)
 
     return jsonify({
         "trayecto": "Tarragona - Barcelona-Sants",
+        "fecha_consultada": fecha_consulta.isoformat(),
         "origen_id": origen,
         "destino_id": destino,
-        "trenes_encontrados": len(encontrados),
-        "trenes": encontrados
+        "trenes_sin_incidencias_detectadas": sin_incidencias,
+        "trenes_con_incidencias": con_incidencias,
+        "total_sin_incidencias": len(sin_incidencias),
+        "total_con_incidencias": len(con_incidencias),
+        "registros_sin_fecha_identificable": sin_fecha,
+        "errores": errores
     })
