@@ -803,6 +803,7 @@ def debug_trayecto():
         }), 502
 
 @app.route("/api/capturar", methods=["POST", "OPTIONS"])
+
 def capturar():
     if request.method == "OPTIONS":
         respuesta = app.make_response("")
@@ -810,7 +811,7 @@ def capturar():
         respuesta.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
         respuesta.headers["Access-Control-Allow-Headers"] = "X-Capture-Token, Content-Type"
         return respuesta, 200
-    # Comprobar el token de seguridad.
+
     token = request.headers.get("X-Capture-Token", "")
 
     if not os.environ.get("CAPTURE_TOKEN"):
@@ -826,39 +827,37 @@ def capturar():
         return jsonify({"error": "Falta configurar Supabase"}), 500
 
     try:
-        # Descargar los dos feeds oficiales de Renfe.
-        alerts_response = requests.get(
-            "https://gtfsrt.renfe.com/alerts.json",
-            timeout=30
-        )
-        alerts_response.raise_for_status()
-        alerts = alerts_response.json()
+        urls = {
+            "alerts": "https://gtfsrt.renfe.com/alerts.json",
+            "trip_updates": "https://gtfsrt.renfe.com/trip_updates.json",
+            "trip_updates_ld": "https://gtfsrt.renfe.com/trip_updates_LD.json"
+        }
 
-        trips_response = requests.get(
-            "https://gtfsrt.renfe.com/trip_updates.json",
-            timeout=30
-        )
-        trips_response.raise_for_status()
-        trip_updates = trips_response.json()
+        feeds = {}
 
-        # Crear una huella digital de ambos feeds.
+        for nombre, url in urls.items():
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            feeds[nombre] = response.json()
+
         contenido = json.dumps(
-            {"alerts": alerts, "trip_updates": trip_updates},
+            feeds,
             sort_keys=True,
             separators=(",", ":")
         )
+
         huella = hashlib.sha256(
             contenido.encode("utf-8")
         ).hexdigest()
 
-        # Guardar la captura en Supabase.
         fila = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "feed_timestamp": str(
-                alerts.get("header", {}).get("timestamp", "")
+                feeds["alerts"].get("header", {}).get("timestamp", "")
             ) or None,
-            "alerts": alerts,
-            "trip_updates": trip_updates,
+            "alerts": feeds["alerts"],
+            "trip_updates": feeds["trip_updates"],
+            "trip_updates_ld": feeds["trip_updates_ld"],
             "sha256": huella
         }
 
@@ -873,11 +872,12 @@ def capturar():
             json=fila,
             timeout=30
         )
+
         respuesta.raise_for_status()
 
         return jsonify({
             "status": "ok",
-            "mensaje": "Captura guardada en Supabase",
+            "mensaje": "Captura de los tres feeds guardada en Supabase",
             "captured_at": fila["captured_at"],
             "sha256": huella
         }), 201
@@ -887,11 +887,13 @@ def capturar():
         return jsonify({
             "error": "No se pudo descargar Renfe o guardar en Supabase"
         }), 502
+
     except (ValueError, TypeError):
         app.logger.exception("Error procesando captura")
         return jsonify({
             "error": "Los datos recibidos no son válidos"
         }), 502
+
 @app.after_request
 def añadir_cors(respuesta):
     respuesta.headers["Access-Control-Allow-Origin"] = "https://hoppscotch.io"
