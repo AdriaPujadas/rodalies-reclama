@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+_ultima_captura_monotonic = 0
 
 GTFS_URL = "https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip"
 
