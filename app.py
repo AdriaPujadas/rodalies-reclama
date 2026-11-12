@@ -975,3 +975,75 @@ def feeds_tiempo_real():
         "fuente": "Feeds GTFS-RT de Renfe",
         "resultados": resultados
     })
+
+@app.get("/api/trayecto-tiempo-real")
+def trayecto_tiempo_real():
+    origen = request.args.get("origen", "71500")
+    destino = request.args.get("destino", "71801")
+
+    fuentes = {
+        "cercanias": "https://gtfsrt.renfe.com/trip_updates.json",
+        "larga_distancia": "https://gtfsrt.renfe.com/trip_updates_LD.json"
+    }
+
+    encontrados = []
+
+    for nombre, url in fuentes.items():
+        try:
+            response = requests.get(url, timeout=25)
+            response.raise_for_status()
+            feed = response.json()
+
+            for entity in feed.get("entity", []):
+                update = entity.get("tripUpdate")
+                if not update:
+                    continue
+
+                trip = update.get("trip", {})
+                paradas = update.get("stopTimeUpdate", [])
+
+                ids = [
+                    str(p.get("stopId", ""))
+                    for p in paradas
+                ]
+
+                if origen not in ids or destino not in ids:
+                    continue
+
+                indice_origen = ids.index(origen)
+                indice_destino = ids.index(destino)
+
+                if indice_origen >= indice_destino:
+                    continue
+
+                def datos_parada(parada):
+                    salida = parada.get("departure", {})
+                    llegada = parada.get("arrival", {})
+
+                    return {
+                        "stop_id": parada.get("stopId"),
+                        "llegada": llegada.get("time"),
+                        "salida": salida.get("time"),
+                        "retraso_llegada_segundos": llegada.get("delay"),
+                        "retraso_salida_segundos": salida.get("delay"),
+                        "estado": parada.get("scheduleRelationship")
+                    }
+
+                encontrados.append({
+                    "fuente": nombre,
+                    "trip_id": trip.get("tripId"),
+                    "estado_viaje": trip.get("scheduleRelationship"),
+                    "origen": datos_parada(paradas[indice_origen]),
+                    "destino": datos_parada(paradas[indice_destino])
+                })
+
+        except (requests.RequestException, ValueError, TypeError):
+            continue
+
+    return jsonify({
+        "trayecto": "Tarragona - Barcelona-Sants",
+        "origen_id": origen,
+        "destino_id": destino,
+        "trenes_encontrados": len(encontrados),
+        "trenes": encontrados
+    })
