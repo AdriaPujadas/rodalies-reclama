@@ -1244,8 +1244,9 @@ def detector():
             })
 
         retrasos = []
-        cancelaciones = {}
-        adelantos = []
+cancelaciones = {}
+adelantos = []
+anomalias = []
 
         for entidad in entidades:
             actualizacion = entidad.get("tripUpdate", {})
