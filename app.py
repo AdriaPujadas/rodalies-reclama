@@ -1220,7 +1220,8 @@ def detector():
         if not filas:
             return jsonify({"error": "No hay capturas guardadas"}), 404
 
-        entidades = filas[0]["trip_updates"].get("entity", [])
+        datos_feed = filas[0].get("trip_updates") or {}
+entidades = datos_feed.get("entity", [])
 
         retrasos = []
         cancelaciones = []
