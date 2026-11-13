@@ -1271,10 +1271,19 @@ anomalias = []
                 })
 
             elif demora is not None and demora < 0:
-                adelantos.append({
-                    "tren": tren,
-                    "adelanto_minutos": round(abs(demora) / 60, 1)
-                })
+    adelanto_minutos = round(abs(demora) / 60, 1)
+
+    if abs(demora) > 7200:
+        anomalias.append({
+            "tren": tren,
+            "valor_minutos": adelanto_minutos,
+            "motivo": "Adelanto superior a 120 minutos; pendiente de verificar"
+        })
+    else:
+        adelantos.append({
+            "tren": tren,
+            "adelanto_minutos": adelanto_minutos
+        })
 
         return jsonify({
             "estado": "datos_encontrados",
