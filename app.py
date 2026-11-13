@@ -1307,10 +1307,189 @@ def detector():
                         })
 
                 for parada in actualizacion.get("stopTimeUpdate", []):
+
+@app.route("/api/detector", methods=["GET"])
+def detector():
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    supabase_key = os.environ.get("SUPABASE_KEY", "")
+
+    if not supabase_url or not supabase_key:
+        return jsonify({"error": "Falta configurar Supabase"}), 500
+
+    try:
+        respuesta = requests.get(
+            f"{supabase_url}/rest/v1/renfe_capturas",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}"
+            },
+            params={
+                "select": "captured_at,trip_updates,trip_updates_ld",
+                "order": "captured_at.desc",
+                "limit": "50"
+            },
+            timeout=30
+        )
+
+        respuesta.raise_for_status()
+        filas = respuesta.json()
+
+        if not filas:
+            return jsonify({"error": "No hay capturas guardadas"}), 404
+
+        fila_elegida = None
+        feeds = {}
+
+        for fila in filas:
+            cercanias = fila.get("trip_updates") or {}
+            larga_distancia = fila.get("trip_updates_ld") or {}
+
+            entidades_cercanias = cercanias.get("entity", [])
+            entidades_ld = larga_distancia.get("entity", [])
+
+            if entidades_cercanias or entidades_ld:
+                fila_elegida = fila
+                feeds = {
+                    "Cercanias": cercanias,
+                    "Larga_distancia": larga_distancia
+                }
+                break
+
+        if fila_elegida is None:
+            return jsonify({
+                "estado": "sin_datos",
+                "mensaje": "Las últimas 50 capturas no contienen actualizaciones",
+                "capturas_consultadas": len(filas)
+            })
+
+        captura_dt = datetime.fromisoformat(
+            fila_elegida["captured_at"].replace("Z", "+00:00")
+        )
+
+        calidad_feeds = {}
+        retrasos = []
+        cancelaciones = {}
+        adelantos = []
+        anomalias = []
+        paradas_suprimidas = []
+
+        total_actualizaciones = 0
+
+        for nombre_feed, datos_feed in feeds.items():
+            entidades = datos_feed.get("entity", [])
+            timestamp = datos_feed.get("header", {}).get("timestamp")
+
+            edad_minutos = None
+            estado_feed = "sin_timestamp"
+
+            if timestamp:
+                try:
+                    fecha_feed = datetime.fromtimestamp(
+                        int(timestamp), tz=timezone.utc
+                    )
+                    edad_minutos = round(
+                        (captura_dt - fecha_feed).total_seconds() / 60, 1
+                    )
+
+                    if edad_minutos < 0:
+                        estado_feed = "timestamp_futuro"
+                    elif edad_minutos > 30:
+                        estado_feed = "antiguo"
+                    else:
+                        estado_feed = "reciente"
+
+                except (ValueError, TypeError, OverflowError):
+                    estado_feed = "timestamp_invalido"
+
+            calidad_feeds[nombre_feed] = {
+                "timestamp": timestamp,
+                "edad_minutos": edad_minutos,
+                "estado": estado_feed
+            }
+
+            for entidad in entidades:
+                actualizacion = entidad.get("tripUpdate", {})
+                if not actualizacion:
+                    continue
+
+                total_actualizaciones += 1
+
+                viaje = actualizacion.get("trip", {})
+                relacion = viaje.get("scheduleRelationship", "")
+                tren = viaje.get("tripId", entidad.get("id"))
+
+                fecha_servicio = None
+                estado_fecha = "fecha_no_identificada"
+
+                try:
+                    fecha_servicio = datetime.strptime(
+                        tren[-10:], "%Y-%m-%d"
+                    ).date().isoformat()
+
+                    if fecha_servicio < captura_dt.date().isoformat():
+                        estado_fecha = "servicio_de_fecha_anterior"
+                    elif fecha_servicio > captura_dt.date().isoformat():
+                        estado_fecha = "servicio_de_fecha_futura"
+                    else:
+                        estado_fecha = "fecha_coincidente"
+
+                except (ValueError, TypeError):
+                    pass
+
+                if estado_feed == "antiguo":
+                    validacion = "feed_antiguo"
+                elif estado_fecha == "servicio_de_fecha_anterior":
+                    validacion = "servicio_de_fecha_anterior"
+                elif estado_fecha == "servicio_de_fecha_futura":
+                    validacion = "servicio_de_fecha_futura"
+                elif estado_feed != "reciente":
+                    validacion = "feed_pendiente_de_validar"
+                else:
+                    validacion = "fecha_y_feed_coincidentes"
+
+                datos_comunes = {
+                    "tren": tren,
+                    "fuente": nombre_feed,
+                    "fecha_servicio": fecha_servicio,
+                    "validacion": validacion
+                }
+
+                if relacion == "CANCELED":
+                    clave = f"{nombre_feed}_{tren}"
+                    cancelaciones[clave] = {
+                        **datos_comunes,
+                        "estado": "Cancelado"
+                    }
+                    continue
+
+                demora = actualizacion.get("delay")
+
+                if demora is not None and demora > 0:
+                    retrasos.append({
+                        **datos_comunes,
+                        "retraso_segundos": demora,
+                        "retraso_minutos": round(demora / 60, 1)
+                    })
+
+                elif demora is not None and demora < 0:
+                    adelanto_minutos = round(abs(demora) / 60, 1)
+
+                    if abs(demora) > 7200:
+                        anomalias.append({
+                            **datos_comunes,
+                            "valor_minutos": adelanto_minutos,
+                            "motivo": "Adelanto superior a 120 minutos; pendiente de verificar"
+                        })
+                    else:
+                        adelantos.append({
+                            **datos_comunes,
+                            "adelanto_minutos": adelanto_minutos
+                        })
+
+                for parada in actualizacion.get("stopTimeUpdate", []):
                     if parada.get("scheduleRelationship") == "SKIPPED":
                         paradas_suprimidas.append({
-                            "tren": tren,
-                            "fuente": nombre_feed,
+                            **datos_comunes,
                             "parada": parada.get("stopId", "No indicada"),
                             "estado": "Parada suprimida"
                         })
@@ -1319,6 +1498,7 @@ def detector():
             "estado": "datos_encontrados",
             "captura": fila_elegida["captured_at"],
             "capturas_consultadas": len(filas),
+            "calidad_feeds": calidad_feeds,
             "total_actualizaciones": total_actualizaciones,
             "total_retrasos": len(retrasos),
             "retrasos": retrasos,
