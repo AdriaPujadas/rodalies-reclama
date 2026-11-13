@@ -1192,6 +1192,7 @@ def trayecto_tiempo_real():
         "registros_sin_fecha_identificable": sin_fecha,
         "errores": errores
     })
+
 @app.route("/api/detector", methods=["GET"])
 def detector():
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -1210,21 +1211,41 @@ def detector():
             params={
                 "select": "captured_at,trip_updates",
                 "order": "captured_at.desc",
-                "limit": "1"
+                "limit": "50"
             },
             timeout=30
         )
+
         respuesta.raise_for_status()
         filas = respuesta.json()
 
         if not filas:
-            return jsonify({"error": "No hay capturas guardadas"}), 404
+            return jsonify({
+                "error": "No hay capturas guardadas"
+            }), 404
 
-        datos_feed = filas[0].get("trip_updates") or {}
-entidades = datos_feed.get("entity", [])
+        fila_elegida = None
+        entidades = []
+
+        for fila in filas:
+            datos_feed = fila.get("trip_updates") or {}
+            entidades_actuales = datos_feed.get("entity", [])
+
+            if entidades_actuales:
+                fila_elegida = fila
+                entidades = entidades_actuales
+                break
+
+        if fila_elegida is None:
+            return jsonify({
+                "estado": "sin_datos",
+                "mensaje": "Las últimas 50 capturas no contienen actualizaciones de trenes",
+                "capturas_consultadas": len(filas)
+            })
 
         retrasos = []
-        cancelaciones = []
+        cancelaciones = {}
+        adelantos = []
 
         for entidad in entidades:
             actualizacion = entidad.get("tripUpdate", {})
@@ -1233,10 +1254,10 @@ entidades = datos_feed.get("entity", [])
             tren = viaje.get("tripId", entidad.get("id"))
 
             if relacion == "CANCELED":
-                cancelaciones.append({
+                cancelaciones[tren] = {
                     "tren": tren,
                     "estado": "Cancelado"
-                })
+                }
                 continue
 
             demora = actualizacion.get("delay")
@@ -1248,14 +1269,27 @@ entidades = datos_feed.get("entity", [])
                     "retraso_minutos": round(demora / 60, 1)
                 })
 
+            elif demora is not None and demora < 0:
+                adelantos.append({
+                    "tren": tren,
+                    "adelanto_minutos": round(abs(demora) / 60, 1)
+                })
+
         return jsonify({
-            "captura": filas[0]["captured_at"],
+            "estado": "datos_encontrados",
+            "captura": fila_elegida["captured_at"],
+            "capturas_consultadas": len(filas),
+            "total_actualizaciones": len(entidades),
             "total_retrasos": len(retrasos),
             "retrasos": retrasos,
             "total_cancelaciones": len(cancelaciones),
-            "cancelaciones": cancelaciones
+            "cancelaciones": list(cancelaciones.values()),
+            "total_adelantos": len(adelantos),
+            "adelantos": adelantos
         })
 
     except requests.RequestException:
         app.logger.exception("Error consultando capturas")
-        return jsonify({"error": "No se pudieron consultar los datos"}), 502
+        return jsonify({
+            "error": "No se pudieron consultar los datos"
+        }), 502
