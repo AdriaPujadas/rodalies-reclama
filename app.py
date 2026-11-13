@@ -1194,6 +1194,7 @@ def trayecto_tiempo_real():
     })
 
 
+
 @app.route("/api/detector", methods=["GET"])
 def detector():
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -1210,7 +1211,7 @@ def detector():
                 "Authorization": f"Bearer {supabase_key}"
             },
             params={
-                "select": "captured_at,trip_updates",
+                "select": "captured_at,trip_updates,trip_updates_ld",
                 "order": "captured_at.desc",
                 "limit": "50"
             },
@@ -1226,15 +1227,21 @@ def detector():
             }), 404
 
         fila_elegida = None
-        entidades = []
+        feeds = {}
 
         for fila in filas:
-            datos_feed = fila.get("trip_updates") or {}
-            entidades_actuales = datos_feed.get("entity", [])
+            datos_cercanias = fila.get("trip_updates") or {}
+            datos_ld = fila.get("trip_updates_ld") or {}
 
-            if entidades_actuales:
+            entidades_cercanias = datos_cercanias.get("entity", [])
+            entidades_ld = datos_ld.get("entity", [])
+
+            if entidades_cercanias or entidades_ld:
                 fila_elegida = fila
-                entidades = entidades_actuales
+                feeds = {
+                    "Cercanias": entidades_cercanias,
+                    "Larga_distancia": entidades_ld
+                }
                 break
 
         if fila_elegida is None:
@@ -1248,49 +1255,71 @@ def detector():
         cancelaciones = {}
         adelantos = []
         anomalias = []
+        paradas_suprimidas = []
 
-        for entidad in entidades:
-            actualizacion = entidad.get("tripUpdate", {})
-            viaje = actualizacion.get("trip", {})
-            relacion = viaje.get("scheduleRelationship", "")
-            tren = viaje.get("tripId", entidad.get("id"))
+        total_actualizaciones = 0
 
-            if relacion == "CANCELED":
-                cancelaciones[tren] = {
-                    "tren": tren,
-                    "estado": "Cancelado"
-                }
-                continue
+        for nombre_feed, entidades in feeds.items():
+            for entidad in entidades:
+                actualizacion = entidad.get("tripUpdate", {})
+                if not actualizacion:
+                    continue
 
-            demora = actualizacion.get("delay")
+                total_actualizaciones += 1
 
-            if demora is not None and demora > 0:
-                retrasos.append({
-                    "tren": tren,
-                    "retraso_segundos": demora,
-                    "retraso_minutos": round(demora / 60, 1)
-                })
+                viaje = actualizacion.get("trip", {})
+                relacion = viaje.get("scheduleRelationship", "")
+                tren = viaje.get("tripId", entidad.get("id"))
 
-            elif demora is not None and demora < 0:
-                adelanto_minutos = round(abs(demora) / 60, 1)
-
-                if abs(demora) > 7200:
-                    anomalias.append({
+                if relacion == "CANCELED":
+                    cancelaciones[f"{nombre_feed}_{tren}"] = {
                         "tren": tren,
-                        "valor_minutos": adelanto_minutos,
-                        "motivo": "Adelanto superior a 120 minutos; pendiente de verificar"
-                    })
-                else:
-                    adelantos.append({
+                        "fuente": nombre_feed,
+                        "estado": "Cancelado"
+                    }
+                    continue
+
+                demora = actualizacion.get("delay")
+
+                if demora is not None and demora > 0:
+                    retrasos.append({
                         "tren": tren,
-                        "adelanto_minutos": adelanto_minutos
+                        "fuente": nombre_feed,
+                        "retraso_segundos": demora,
+                        "retraso_minutos": round(demora / 60, 1)
                     })
+
+                elif demora is not None and demora < 0:
+                    adelanto_minutos = round(abs(demora) / 60, 1)
+
+                    if abs(demora) > 7200:
+                        anomalias.append({
+                            "tren": tren,
+                            "fuente": nombre_feed,
+                            "valor_minutos": adelanto_minutos,
+                            "motivo": "Adelanto superior a 120 minutos; pendiente de verificar"
+                        })
+                    else:
+                        adelantos.append({
+                            "tren": tren,
+                            "fuente": nombre_feed,
+                            "adelanto_minutos": adelanto_minutos
+                        })
+
+                for parada in actualizacion.get("stopTimeUpdate", []):
+                    if parada.get("scheduleRelationship") == "SKIPPED":
+                        paradas_suprimidas.append({
+                            "tren": tren,
+                            "fuente": nombre_feed,
+                            "parada": parada.get("stopId", "No indicada"),
+                            "estado": "Parada suprimida"
+                        })
 
         return jsonify({
             "estado": "datos_encontrados",
             "captura": fila_elegida["captured_at"],
             "capturas_consultadas": len(filas),
-            "total_actualizaciones": len(entidades),
+            "total_actualizaciones": total_actualizaciones,
             "total_retrasos": len(retrasos),
             "retrasos": retrasos,
             "total_cancelaciones": len(cancelaciones),
@@ -1298,7 +1327,9 @@ def detector():
             "total_adelantos": len(adelantos),
             "adelantos": adelantos,
             "total_anomalias": len(anomalias),
-            "anomalias": anomalias
+            "anomalias": anomalias,
+            "total_paradas_suprimidas": len(paradas_suprimidas),
+            "paradas_suprimidas": paradas_suprimidas
         })
 
     except requests.RequestException:
