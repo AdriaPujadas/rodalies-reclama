@@ -893,7 +893,36 @@ def capturar():
         return jsonify({
             "error": "Los datos recibidos no son válidos"
         }), 502
+@app.route("/panel-captura", methods=["GET", "POST"])
+def panel_captura():
+    if request.method == "GET":
+        return """
+        <h2>Rodalies Reclama</h2>
+        <h3>Captura de datos de Renfe</h3>
+        <form method="POST">
+            <label>Token de seguridad:</label><br>
+            <input type="password" name="token" required>
+            <br><br>
+            <button type="submit">Guardar captura</button>
+        </form>
+        """
 
+    token = request.form.get("token", "")
+
+    if not os.environ.get("CAPTURE_TOKEN") or token != os.environ["CAPTURE_TOKEN"]:
+        return "No autorizado. Comprueba el token.", 401
+
+    with app.test_client() as cliente:
+        resultado = cliente.post(
+            "/api/capturar",
+            headers={"X-Capture-Token": token}
+        )
+
+    return (
+        "<h2>Resultado de la captura</h2><pre>"
+        + resultado.get_data(as_text=True)
+        + "</pre>"
+    ), resultado.status_code
 @app.after_request
 def añadir_cors(respuesta):
     respuesta.headers["Access-Control-Allow-Origin"] = "https://hoppscotch.io"
