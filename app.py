@@ -1295,7 +1295,9 @@ anomalias = []
             "total_cancelaciones": len(cancelaciones),
             "cancelaciones": list(cancelaciones.values()),
             "total_adelantos": len(adelantos),
-            "adelantos": adelantos
+"adelantos": adelantos,
+"total_anomalias": len(anomalias),
+"anomalias": anomalias
         })
 
     except requests.RequestException:
