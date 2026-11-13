@@ -1192,3 +1192,69 @@ def trayecto_tiempo_real():
         "registros_sin_fecha_identificable": sin_fecha,
         "errores": errores
     })
+@app.route("/api/detector", methods=["GET"])
+def detector():
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    supabase_key = os.environ.get("SUPABASE_KEY", "")
+
+    if not supabase_url or not supabase_key:
+        return jsonify({"error": "Falta configurar Supabase"}), 500
+
+    try:
+        respuesta = requests.get(
+            f"{supabase_url}/rest/v1/renfe_capturas",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}"
+            },
+            params={
+                "select": "captured_at,trip_updates",
+                "order": "captured_at.desc",
+                "limit": "1"
+            },
+            timeout=30
+        )
+        respuesta.raise_for_status()
+        filas = respuesta.json()
+
+        if not filas:
+            return jsonify({"error": "No hay capturas guardadas"}), 404
+
+        entidades = filas[0]["trip_updates"].get("entity", [])
+
+        retrasos = []
+        cancelaciones = []
+
+        for entidad in entidades:
+            actualizacion = entidad.get("tripUpdate", {})
+            viaje = actualizacion.get("trip", {})
+            relacion = viaje.get("scheduleRelationship", "")
+            tren = viaje.get("tripId", entidad.get("id"))
+
+            if relacion == "CANCELED":
+                cancelaciones.append({
+                    "tren": tren,
+                    "estado": "Cancelado"
+                })
+                continue
+
+            demora = actualizacion.get("delay")
+
+            if demora is not None and demora > 0:
+                retrasos.append({
+                    "tren": tren,
+                    "retraso_segundos": demora,
+                    "retraso_minutos": round(demora / 60, 1)
+                })
+
+        return jsonify({
+            "captura": filas[0]["captured_at"],
+            "total_retrasos": len(retrasos),
+            "retrasos": retrasos,
+            "total_cancelaciones": len(cancelaciones),
+            "cancelaciones": cancelaciones
+        })
+
+    except requests.RequestException:
+        app.logger.exception("Error consultando capturas")
+        return jsonify({"error": "No se pudieron consultar los datos"}), 502
