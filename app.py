@@ -1193,6 +1193,7 @@ def trayecto_tiempo_real():
         "errores": errores
     })
 
+
 @app.route("/api/detector", methods=["GET"])
 def detector():
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -1244,9 +1245,9 @@ def detector():
             })
 
         retrasos = []
-cancelaciones = {}
-adelantos = []
-anomalias = []
+        cancelaciones = {}
+        adelantos = []
+        anomalias = []
 
         for entidad in entidades:
             actualizacion = entidad.get("tripUpdate", {})
@@ -1271,19 +1272,19 @@ anomalias = []
                 })
 
             elif demora is not None and demora < 0:
-    adelanto_minutos = round(abs(demora) / 60, 1)
+                adelanto_minutos = round(abs(demora) / 60, 1)
 
-    if abs(demora) > 7200:
-        anomalias.append({
-            "tren": tren,
-            "valor_minutos": adelanto_minutos,
-            "motivo": "Adelanto superior a 120 minutos; pendiente de verificar"
-        })
-    else:
-        adelantos.append({
-            "tren": tren,
-            "adelanto_minutos": adelanto_minutos
-        })
+                if abs(demora) > 7200:
+                    anomalias.append({
+                        "tren": tren,
+                        "valor_minutos": adelanto_minutos,
+                        "motivo": "Adelanto superior a 120 minutos; pendiente de verificar"
+                    })
+                else:
+                    adelantos.append({
+                        "tren": tren,
+                        "adelanto_minutos": adelanto_minutos
+                    })
 
         return jsonify({
             "estado": "datos_encontrados",
@@ -1295,13 +1296,19 @@ anomalias = []
             "total_cancelaciones": len(cancelaciones),
             "cancelaciones": list(cancelaciones.values()),
             "total_adelantos": len(adelantos),
-"adelantos": adelantos,
-"total_anomalias": len(anomalias),
-"anomalias": anomalias
+            "adelantos": adelantos,
+            "total_anomalias": len(anomalias),
+            "anomalias": anomalias
         })
 
     except requests.RequestException:
         app.logger.exception("Error consultando capturas")
         return jsonify({
             "error": "No se pudieron consultar los datos"
+        }), 502
+
+    except (ValueError, TypeError):
+        app.logger.exception("Error procesando datos del detector")
+        return jsonify({
+            "error": "Los datos recibidos no son válidos"
         }), 502
